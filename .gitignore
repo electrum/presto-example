@@ -1,0 +1,9 @@
+*.iml
+*.ipr
+*.iws
+target/
+pom.xml.versionsBackup
+test-output/
+.idea
+.*.swp
+.*.swo
