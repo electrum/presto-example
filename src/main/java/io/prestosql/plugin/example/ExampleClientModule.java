@@ -11,14 +11,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.facebook.presto.plugin.example;
+package io.prestosql.plugin.example;
 
-import com.facebook.presto.plugin.jdbc.BaseJdbcConfig;
-import com.facebook.presto.plugin.jdbc.JdbcClient;
 import com.google.inject.Binder;
 import com.google.inject.Scopes;
 import com.mysql.jdbc.Driver;
 import io.airlift.configuration.AbstractConfigurationAwareModule;
+import io.prestosql.plugin.jdbc.BaseJdbcConfig;
+import io.prestosql.plugin.jdbc.JdbcClient;
 
 import java.sql.SQLException;
 import java.util.Properties;

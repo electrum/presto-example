@@ -11,20 +11,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.facebook.presto.plugin.example;
+package io.prestosql.plugin.example;
 
-import com.facebook.presto.plugin.jdbc.BaseJdbcClient;
-import com.facebook.presto.plugin.jdbc.BaseJdbcConfig;
-import com.facebook.presto.plugin.jdbc.ConnectionFactory;
-import com.facebook.presto.plugin.jdbc.DriverConnectionFactory;
-import com.facebook.presto.plugin.jdbc.JdbcConnectorId;
-import com.facebook.presto.spi.PrestoException;
-import com.facebook.presto.spi.SchemaTableName;
-import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.spi.type.VarcharType;
 import com.google.common.collect.ImmutableSet;
 import com.mysql.jdbc.Driver;
 import com.mysql.jdbc.Statement;
+import io.prestosql.plugin.jdbc.BaseJdbcClient;
+import io.prestosql.plugin.jdbc.BaseJdbcConfig;
+import io.prestosql.plugin.jdbc.ConnectionFactory;
+import io.prestosql.plugin.jdbc.DriverConnectionFactory;
+import io.prestosql.plugin.jdbc.WriteMapping;
+import io.prestosql.spi.PrestoException;
+import io.prestosql.spi.connector.ConnectorSession;
+import io.prestosql.spi.type.Type;
+import io.prestosql.spi.type.VarcharType;
 
 import javax.inject.Inject;
 
@@ -33,28 +33,33 @@ import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collection;
+import java.util.Optional;
 import java.util.Properties;
-import java.util.Set;
 
-import static com.facebook.presto.plugin.jdbc.DriverConnectionFactory.basicConnectionProperties;
-import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
-import static com.facebook.presto.spi.type.RealType.REAL;
-import static com.facebook.presto.spi.type.TimeWithTimeZoneType.TIME_WITH_TIME_ZONE;
-import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
-import static com.facebook.presto.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
-import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
-import static com.facebook.presto.spi.type.Varchars.isVarcharType;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
+import static io.prestosql.plugin.jdbc.DriverConnectionFactory.basicConnectionProperties;
+import static io.prestosql.plugin.jdbc.StandardColumnMappings.realWriteFunction;
+import static io.prestosql.plugin.jdbc.StandardColumnMappings.timestampWriteFunctionUsingSqlTimestamp;
+import static io.prestosql.plugin.jdbc.StandardColumnMappings.varbinaryWriteFunction;
+import static io.prestosql.plugin.jdbc.StandardColumnMappings.varcharWriteFunction;
+import static io.prestosql.spi.StandardErrorCode.NOT_SUPPORTED;
+import static io.prestosql.spi.type.RealType.REAL;
+import static io.prestosql.spi.type.TimeWithTimeZoneType.TIME_WITH_TIME_ZONE;
+import static io.prestosql.spi.type.TimestampType.TIMESTAMP;
+import static io.prestosql.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
+import static io.prestosql.spi.type.VarbinaryType.VARBINARY;
+import static io.prestosql.spi.type.Varchars.isVarcharType;
 import static java.util.Locale.ENGLISH;
 
 public class ExampleClient
         extends BaseJdbcClient
 {
     @Inject
-    public ExampleClient(JdbcConnectorId connectorId, BaseJdbcConfig config, ExampleConfig exampleConfig)
+    public ExampleClient(BaseJdbcConfig config, ExampleConfig exampleConfig)
             throws SQLException
     {
-        super(connectorId, config, "`", connectionFactory(config, exampleConfig));
+        super(config, "`", connectionFactory(config, exampleConfig));
     }
 
     private static ConnectionFactory connectionFactory(BaseJdbcConfig config, ExampleConfig exampleConfig)
@@ -74,15 +79,19 @@ public class ExampleClient
             connectionProperties.setProperty("connectTimeout", String.valueOf(exampleConfig.getConnectionTimeout().toMillis()));
         }
 
-        return new DriverConnectionFactory(new Driver(), config.getConnectionUrl(), connectionProperties);
+        return new DriverConnectionFactory(
+                new Driver(),
+                config.getConnectionUrl(),
+                Optional.ofNullable(config.getUserCredentialName()),
+                Optional.ofNullable(config.getPasswordCredentialName()),
+                connectionProperties);
     }
 
     @Override
-    public Set<String> getSchemaNames()
+    protected Collection<String> listSchemas(Connection connection)
     {
         // for MySQL, we need to list catalogs instead of schemas
-        try (Connection connection = connectionFactory.openConnection();
-                ResultSet resultSet = connection.getMetaData().getCatalogs()) {
+        try (ResultSet resultSet = connection.getMetaData().getCatalogs()) {
             ImmutableSet.Builder<String> schemaNames = ImmutableSet.builder();
             while (resultSet.next()) {
                 String schemaName = resultSet.getString("TABLE_CAT").toLowerCase(ENGLISH);
@@ -125,61 +134,64 @@ public class ExampleClient
     }
 
     @Override
-    protected ResultSet getTables(Connection connection, String schemaName, String tableName)
+    protected ResultSet getTables(Connection connection, Optional<String> schemaName, Optional<String> tableName)
             throws SQLException
     {
         // MySQL maps their "database" to SQL catalogs and does not have schemas
         DatabaseMetaData metadata = connection.getMetaData();
-        String escape = metadata.getSearchStringEscape();
+        Optional<String> escape = Optional.ofNullable(metadata.getSearchStringEscape());
         return metadata.getTables(
-                schemaName,
+                schemaName.orElse(null),
                 null,
-                escapeNamePattern(tableName, escape),
+                escapeNamePattern(tableName, escape).orElse(null),
                 new String[] {"TABLE", "VIEW"});
     }
 
     @Override
-    protected SchemaTableName getSchemaTableName(ResultSet resultSet)
+    protected String getTableSchemaName(ResultSet resultSet)
             throws SQLException
     {
         // MySQL uses catalogs instead of schemas
-        return new SchemaTableName(
-                resultSet.getString("TABLE_CAT").toLowerCase(ENGLISH),
-                resultSet.getString("TABLE_NAME").toLowerCase(ENGLISH));
+        return resultSet.getString("TABLE_CAT");
     }
 
     @Override
-    protected String toSqlType(Type type)
+    public WriteMapping toWriteMapping(ConnectorSession session, Type type)
     {
         if (REAL.equals(type)) {
-            return "float";
+            return WriteMapping.longMapping("float", realWriteFunction());
         }
         if (TIME_WITH_TIME_ZONE.equals(type) || TIMESTAMP_WITH_TIME_ZONE.equals(type)) {
             throw new PrestoException(NOT_SUPPORTED, "Unsupported column type: " + type.getDisplayName());
         }
         if (TIMESTAMP.equals(type)) {
-            return "datetime";
+            // TODO use `timestampWriteFunction`
+            return WriteMapping.longMapping("datetime", timestampWriteFunctionUsingSqlTimestamp(session));
         }
         if (VARBINARY.equals(type)) {
-            return "mediumblob";
+            return WriteMapping.sliceMapping("mediumblob", varbinaryWriteFunction());
         }
         if (isVarcharType(type)) {
             VarcharType varcharType = (VarcharType) type;
+            String dataType;
             if (varcharType.isUnbounded()) {
-                return "longtext";
+                dataType = "longtext";
             }
-            if (varcharType.getLengthSafe() <= 255) {
-                return "tinytext";
+            else if (varcharType.getBoundedLength() <= 255) {
+                dataType = "tinytext";
             }
-            if (varcharType.getLengthSafe() <= 65535) {
-                return "text";
+            else if (varcharType.getBoundedLength() <= 65535) {
+                dataType = "text";
             }
-            if (varcharType.getLengthSafe() <= 16777215) {
-                return "mediumtext";
+            else if (varcharType.getBoundedLength() <= 16777215) {
+                dataType = "mediumtext";
             }
-            return "longtext";
+            else {
+                dataType = "longtext";
+            }
+            return WriteMapping.sliceMapping(dataType, varcharWriteFunction());
         }
 
-        return super.toSqlType(type);
+        return super.toWriteMapping(session, type);
     }
 }

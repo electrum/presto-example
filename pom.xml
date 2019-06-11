@@ -2,30 +2,33 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.facebook.presto.example</groupId>
+    <groupId>io.prestosql.example</groupId>
     <artifactId>presto-example</artifactId>
     <version>1-SNAPSHOT</version>
     <packaging>presto-plugin</packaging>
 
     <name>presto-example</name>
     <description>Example standalone Presto plugin</description>
-    <url>https://prestodb.io/</url>
+    <url>https://prestosql.io/</url>
 
     <parent>
         <groupId>io.airlift</groupId>
         <artifactId>airbase</artifactId>
-        <version>87</version>
+        <version>91</version>
     </parent>
 
     <properties>
-        <dep.presto.version>0.213</dep.presto.version>
-        <dep.airlift.version>0.175</dep.airlift.version>
+        <air.check.skip-pmd>true</air.check.skip-pmd>
+
+        <dep.presto.version>314</dep.presto.version>
+        <dep.airlift.version>0.183</dep.airlift.version>
         <dep.slice.version>0.36</dep.slice.version>
+        <dep.joda.version>2.10</dep.joda.version>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>com.facebook.presto</groupId>
+            <groupId>io.prestosql</groupId>
             <artifactId>presto-base-jdbc</artifactId>
             <version>${dep.presto.version}</version>
         </dependency>
@@ -64,7 +67,7 @@
 
         <!-- Presto SPI -->
         <dependency>
-            <groupId>com.facebook.presto</groupId>
+            <groupId>io.prestosql</groupId>
             <artifactId>presto-spi</artifactId>
             <version>${dep.presto.version}</version>
             <scope>provided</scope>
@@ -100,9 +103,9 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>com.facebook.presto</groupId>
+                <groupId>io.prestosql</groupId>
                 <artifactId>presto-maven-plugin</artifactId>
-                <version>0.3</version>
+                <version>6</version>
                 <extensions>true</extensions>
             </plugin>
         </plugins>
