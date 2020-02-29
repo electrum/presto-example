@@ -14,39 +14,56 @@
 package io.prestosql.plugin.example;
 
 import com.google.inject.Binder;
+import com.google.inject.Module;
+import com.google.inject.Provides;
 import com.google.inject.Scopes;
+import com.google.inject.Singleton;
 import com.mysql.jdbc.Driver;
-import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.prestosql.plugin.jdbc.BaseJdbcConfig;
+import io.prestosql.plugin.jdbc.ConnectionFactory;
+import io.prestosql.plugin.jdbc.DriverConnectionFactory;
+import io.prestosql.plugin.jdbc.ForBaseJdbc;
 import io.prestosql.plugin.jdbc.JdbcClient;
+import io.prestosql.plugin.jdbc.credential.CredentialProvider;
 
 import java.sql.SQLException;
 import java.util.Properties;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static io.airlift.configuration.ConfigBinder.configBinder;
 
 public class ExampleClientModule
-        extends AbstractConfigurationAwareModule
+        implements Module
 {
     @Override
-    protected void setup(Binder binder)
+    public void configure(Binder binder)
     {
-        binder.bind(JdbcClient.class).to(ExampleClient.class).in(Scopes.SINGLETON);
-        ensureCatalogIsEmpty(buildConfigObject(BaseJdbcConfig.class).getConnectionUrl());
+        binder.bind(JdbcClient.class).annotatedWith(ForBaseJdbc.class).to(ExampleClient.class).in(Scopes.SINGLETON);
         configBinder(binder).bindConfig(ExampleConfig.class);
     }
 
-    private static void ensureCatalogIsEmpty(String connectionUrl)
+    @Provides
+    @Singleton
+    @ForBaseJdbc
+    public static ConnectionFactory createConnectionFactory(BaseJdbcConfig baseConfig, CredentialProvider credentialProvider, ExampleConfig config)
+            throws SQLException
     {
-        try {
-            Driver driver = new Driver();
-            Properties urlProperties = driver.parseURL(connectionUrl, null);
-            checkArgument(urlProperties != null, "Invalid JDBC URL for MySQL connector");
-            checkArgument(driver.database(urlProperties) == null, "Database (catalog) must not be specified in JDBC URL for MySQL connector");
+        Properties connectionProperties = new Properties();
+        connectionProperties.setProperty("nullCatalogMeansCurrent", "false");
+        connectionProperties.setProperty("useUnicode", "true");
+        connectionProperties.setProperty("characterEncoding", "utf8");
+        connectionProperties.setProperty("tinyInt1isBit", "false");
+        if (config.isAutoReconnect()) {
+            connectionProperties.setProperty("autoReconnect", String.valueOf(config.isAutoReconnect()));
+            connectionProperties.setProperty("maxReconnects", String.valueOf(config.getMaxReconnects()));
         }
-        catch (SQLException e) {
-            throw new RuntimeException(e);
+        if (config.getConnectionTimeout() != null) {
+            connectionProperties.setProperty("connectTimeout", String.valueOf(config.getConnectionTimeout().toMillis()));
         }
+
+        return new DriverConnectionFactory(
+                new Driver(),
+                baseConfig.getConnectionUrl(),
+                connectionProperties,
+                credentialProvider);
     }
 }

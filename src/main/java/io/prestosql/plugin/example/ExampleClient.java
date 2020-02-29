@@ -14,12 +14,10 @@
 package io.prestosql.plugin.example;
 
 import com.google.common.collect.ImmutableSet;
-import com.mysql.jdbc.Driver;
 import com.mysql.jdbc.Statement;
 import io.prestosql.plugin.jdbc.BaseJdbcClient;
 import io.prestosql.plugin.jdbc.BaseJdbcConfig;
 import io.prestosql.plugin.jdbc.ConnectionFactory;
-import io.prestosql.plugin.jdbc.DriverConnectionFactory;
 import io.prestosql.plugin.jdbc.WriteMapping;
 import io.prestosql.spi.PrestoException;
 import io.prestosql.spi.connector.ConnectorSession;
@@ -35,12 +33,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.Optional;
-import java.util.Properties;
 
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
-import static io.prestosql.plugin.jdbc.DriverConnectionFactory.basicConnectionProperties;
 import static io.prestosql.plugin.jdbc.StandardColumnMappings.realWriteFunction;
-import static io.prestosql.plugin.jdbc.StandardColumnMappings.timestampWriteFunctionUsingSqlTimestamp;
 import static io.prestosql.plugin.jdbc.StandardColumnMappings.varbinaryWriteFunction;
 import static io.prestosql.plugin.jdbc.StandardColumnMappings.varcharWriteFunction;
 import static io.prestosql.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -56,35 +51,10 @@ public class ExampleClient
         extends BaseJdbcClient
 {
     @Inject
-    public ExampleClient(BaseJdbcConfig config, ExampleConfig exampleConfig)
+    public ExampleClient(BaseJdbcConfig config, ConnectionFactory connectionFactory)
             throws SQLException
     {
-        super(config, "`", connectionFactory(config, exampleConfig));
-    }
-
-    private static ConnectionFactory connectionFactory(BaseJdbcConfig config, ExampleConfig exampleConfig)
-            throws SQLException
-    {
-        Properties connectionProperties = basicConnectionProperties(config);
-        connectionProperties.setProperty("useInformationSchema", "true");
-        connectionProperties.setProperty("nullCatalogMeansCurrent", "false");
-        connectionProperties.setProperty("useUnicode", "true");
-        connectionProperties.setProperty("characterEncoding", "utf8");
-        connectionProperties.setProperty("tinyInt1isBit", "false");
-        if (exampleConfig.isAutoReconnect()) {
-            connectionProperties.setProperty("autoReconnect", String.valueOf(exampleConfig.isAutoReconnect()));
-            connectionProperties.setProperty("maxReconnects", String.valueOf(exampleConfig.getMaxReconnects()));
-        }
-        if (exampleConfig.getConnectionTimeout() != null) {
-            connectionProperties.setProperty("connectTimeout", String.valueOf(exampleConfig.getConnectionTimeout().toMillis()));
-        }
-
-        return new DriverConnectionFactory(
-                new Driver(),
-                config.getConnectionUrl(),
-                Optional.ofNullable(config.getUserCredentialName()),
-                Optional.ofNullable(config.getPasswordCredentialName()),
-                connectionProperties);
+        super(config, "`", connectionFactory);
     }
 
     @Override
@@ -139,11 +109,10 @@ public class ExampleClient
     {
         // MySQL maps their "database" to SQL catalogs and does not have schemas
         DatabaseMetaData metadata = connection.getMetaData();
-        Optional<String> escape = Optional.ofNullable(metadata.getSearchStringEscape());
         return metadata.getTables(
                 schemaName.orElse(null),
                 null,
-                escapeNamePattern(tableName, escape).orElse(null),
+                escapeNamePattern(tableName, metadata.getSearchStringEscape()).orElse(null),
                 new String[] {"TABLE", "VIEW"});
     }
 
@@ -161,12 +130,8 @@ public class ExampleClient
         if (REAL.equals(type)) {
             return WriteMapping.longMapping("float", realWriteFunction());
         }
-        if (TIME_WITH_TIME_ZONE.equals(type) || TIMESTAMP_WITH_TIME_ZONE.equals(type)) {
+        if (TIMESTAMP.equals(type) || TIME_WITH_TIME_ZONE.equals(type) || TIMESTAMP_WITH_TIME_ZONE.equals(type)) {
             throw new PrestoException(NOT_SUPPORTED, "Unsupported column type: " + type.getDisplayName());
-        }
-        if (TIMESTAMP.equals(type)) {
-            // TODO use `timestampWriteFunction`
-            return WriteMapping.longMapping("datetime", timestampWriteFunctionUsingSqlTimestamp(session));
         }
         if (VARBINARY.equals(type)) {
             return WriteMapping.sliceMapping("mediumblob", varbinaryWriteFunction());
